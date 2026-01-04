@@ -1,0 +1,2 @@
+# dailyreportforjimmy
+加密货币信息推送，中英hybrid，该项目通过api调度Deepseek整合加密货币信息，通过pushplus推送至一对一微信
