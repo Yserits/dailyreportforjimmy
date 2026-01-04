@@ -1,0 +1,39 @@
+name: Crypto Daily Push
+
+# 这里决定了什么时候运行
+on:
+  # 1. 
+  # 00:00 UTC = 悉尼时间上午 11:00 (夏令时)
+  schedule:
+    - cron: '0 0 * * *'
+  
+  # 2. 手动运行
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    
+    steps:
+      # 第一步：把代码从仓库里拉下来
+      - name: Checkout code
+        uses: actions/checkout@v2
+      
+      # 第二步：安装 Python 环境
+      - name: Set up Python
+        uses: actions/setup-python@v2
+        with:
+          python-version: '3.9'
+      
+      # 第三步：安装 requests 工具包
+      - name: Install dependencies
+        run: |
+          pip install -r requirements.txt
+      
+      # 第四步：运行你的 main.py
+      - name: Run daily news script
+        # 这里非常重要：要把保险箱里的钥匙取出来给代码用
+        env:
+          LLM_API_KEY: ${{ secrets.LLM_API_KEY }}
+          PUSHPLUS_TOKEN: ${{ secrets.PUSHPLUS_TOKEN }}
+        run: python main.py
