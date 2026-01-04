@@ -118,7 +118,7 @@ def send_to_wechat(content):
     url = "http://www.pushplus.plus/send"
     data = {
         "token": PUSHPLUS_TOKEN,
-        "title": "今日币圈早报 (CoinTelegraph版)",
+        "title": "华尔街之狼几米，你的日报来咯",
         "content": content,
         "template": "markdown"
     }
