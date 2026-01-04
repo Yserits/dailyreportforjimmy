@@ -1,69 +1,90 @@
 import requests
 import os
-import json
+import xml.etree.ElementTree as ET # 引入这个自带工具来解析 RSS
 import time
 
-# apiKEY调用
+# 读取配置
 DEEPSEEK_API_KEY = os.environ.get("LLM_API_KEY")
 PUSHPLUS_TOKEN = os.environ.get("PUSHPLUS_TOKEN")
 
-# DeepSeek 的配置
+# DeepSeek 配置
 API_URL = "https://api.deepseek.com/chat/completions"
 
 def get_crypto_news():
     """
-    抓取 CoinGecko 的最新新闻
+    [修改版] 抓取 Cointelegraph 的 RSS 订阅源
+    RSS 相比 API 更稳定，不容易被屏蔽
     """
-    print("正在抓取 CoinGecko 资讯...")
-    url = "https://api.coingecko.com/api/v3/news"
+    print("正在抓取 Cointelegraph 新闻...")
+    url = "https://cointelegraph.com/rss"
+    
+    # 伪装成普通浏览器，防止被拦截
+    headers = {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36"
+    }
+
     try:
-        # 抓取前 5 条新闻
-        response = requests.get(url, timeout=15)
-        data = response.json()
-        if 'data' in data:
-            return data['data'][:5] # 只取前5条
-        else:
-            return []
+        response = requests.get(url, headers=headers, timeout=20)
+        # 解析 XML 数据
+        root = ET.fromstring(response.content)
+        
+        news_list = []
+        # 查找所有的 item 标签 (每一条新闻)
+        # 我们只取前 5 条
+        for item in root.findall('.//item')[:5]:
+            title = item.find('title').text
+            #有些 RSS 的描述里带 HTML 标签，我们简单清洗一下（如果需要）
+            description = item.find('description').text
+            if description:
+                # 简单去除 HTML 标签的粗暴方法，或者直接发给 AI 让 AI 去洗
+                pass 
+            
+            news_list.append({
+                'title': title, 
+                'description': description
+            })
+            
+        print(f"成功获取 {len(news_list)} 条新闻")
+        return news_list
+
     except Exception as e:
         print(f"抓取失败: {e}")
         return []
 
 def ai_summarize(news_list):
     """
-    调用 DeepSeek
+    调用 DeepSeek 进行总结和翻译
     """
     print("正在请求 AI 进行分析...")
     if not news_list:
-        return "⚠️ 今日未获取到新闻数据，请检查网络或源站状态。"
+        return "⚠️ 今日未获取到新闻数据 (RSS源为空)。"
 
-    # 拼成一句话，汇总新闻
+    # 拼接新闻
     news_text = ""
     for i, news in enumerate(news_list):
-        news_text += f"{i+1}. Title: {news.get('title', 'No Title')}\nContent: {news.get('description', 'No Content')}\n\n"
+        # 只取前200个字符避免太长费钱
+        desc_preview = news.get('description', '')[:200] 
+        news_text += f"{i+1}. {news.get('title')}\nDesc: {desc_preview}...\n\n"
 
-    # Prompt ，决定了输出的风格
     prompt = f"""
-    You are a professional crypto market analyst. Here are the latest news snippets:
+    You are a crypto analyst. Summarize these 5 news items for a WeChat daily report.
     
+    Data:
     {news_text}
     
-    Please summarize these news items into a daily report for a WeChat message.
     Requirements:
-    1. Use a professional but easy-to-read tone.
-    2. **Language Style**: Mixed Chinese and English. Translate the main logic into Chinese, but **KEEP professional crypto terms in English** (e.g., Bullish, Bearish, Pump, Dump, ETF, Liquidity, Volatility).
-    3. Format:
-       - 📅 **Daily Crypto Brief**
-       - [Emoji] Title (Chinese with English keywords)
-       - Brief summary (1-2 sentences).
-    4. At the end, give a "Market Sentiment" score (0-10) and a one-sentence comment.
-    
-    Output the result directly in plain text (Markdown is supported).
+    1. **Format**: Mixed Chinese and English.
+    2. **Translate** the summary to Chinese, but **KEEP** professional terms in English (e.g. Bullish, ETF, Liquidity).
+    3. Output Format (Markdown):
+       - 📅 **Crypto Daily**
+       - [Emoji] **Title** (Chinese)
+       - Summary (1 sentence)
+    4. End with a "Market Sentiment" score (0-10).
     """
 
     payload = {
         "model": "deepseek-chat",
         "messages": [
-            {"role": "system", "content": "You are a helpful assistant."},
             {"role": "user", "content": prompt}
         ],
         "temperature": 0.7
@@ -75,28 +96,31 @@ def ai_summarize(news_list):
     }
 
     try:
-        # 发送请求给 DeepSeek
         response = requests.post(API_URL, headers=headers, json=payload)
         response_json = response.json()
         
-        # 获取 AI 回复的内容
+        # 检查有没有报错
+        if 'error' in response_json:
+            print(f"DeepSeek API 报错: {response_json['error']}")
+            return f"AI 罢工了: {response_json['error']['message']}"
+            
         content = response_json['choices'][0]['message']['content']
         return content
     except Exception as e:
-        print(f"AI 分析失败: {e}")
-        return f"AI 接口报错: {str(e)}"
+        print(f"AI 请求异常: {e}")
+        return f"AI 连接失败: {str(e)}"
 
 def send_to_wechat(content):
     """
-    推送到微信 (PushPlus)
+    推送到微信
     """
     print("正在推送至微信...")
     url = "http://www.pushplus.plus/send"
     data = {
         "token": PUSHPLUS_TOKEN,
-        "title": "今日币圈早报 (AI版)",
+        "title": "今日币圈早报 (CoinTelegraph版)",
         "content": content,
-        "template": "markdown" # 使用 markdown 格式，排版更漂亮
+        "template": "markdown"
     }
     
     try:
@@ -110,14 +134,18 @@ if __name__ == "__main__":
     news = get_crypto_news()
     
     # 2. AI 处理
+    # 如果 DeepSeek 没钱了，这里会报错，但我们至少先看看能不能抓到新闻
     if news:
+        # 如果你确定 DeepSeek 有额度，就用这一行：
         report = ai_summarize(news)
+        
+        # 【备用方案】如果 AI 还是坏的，把上面那行注释掉，用下面这行直接发英文：
+        # report = "今日新闻 (AI 暂不可用):\n\n" + "\n".join([n['title'] for n in news])
     else:
-        report = "今日无法获取新闻，请检查代码或源站。"
+        report = "⚠️ 无法获取新闻，CoinTelegraph 可能也屏蔽了 IP。"
     
     # 3. 发微信
-    # 只有当两个 key 都有值的时候才发送，防止报错
-    if DEEPSEEK_API_KEY and PUSHPLUS_TOKEN:
+    if PUSHPLUS_TOKEN:
         send_to_wechat(report)
     else:
-        print("请检查 GitHub Secrets 是否配置了 LLM_API_KEY 和 PUSHPLUS_TOKEN")
+        print("缺少 PUSHPLUS_TOKEN")
